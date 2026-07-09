@@ -78,7 +78,7 @@ def main(cfg: DictConfig):
                 
                 state_cmd.vel_cmd[0] = -joystick.get_axis_value(1)
                 state_cmd.vel_cmd[1] = -joystick.get_axis_value(0)
-                state_cmd.vel_cmd[2] = -joystick.get_axis_value(3)
+                state_cmd.vel_cmd[2] = -joystick.get_axis_value(2)
                 
                 step_start = time.time()
                 
