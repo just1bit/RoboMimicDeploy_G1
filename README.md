@@ -56,10 +56,38 @@ pip install -e .
 
 ## 运行代码
 
-## 1. 运行Mujoco仿真代码
+### 手柄兼容性
+
+程序启动时自动检测平台并选择后端，无需手动配置：
+
+| 平台 | 后端 | 支持手柄 |
+|------|------|---------|
+| Linux / Windows | pygame (SDL2) | Xbox、PlayStation 及大部分标准手柄 |
+| macOS + mjpython | hidapi | DualSense PS5（USB 有线连接） |
+
+> macOS 上必须使用 `mjpython` 启动仿真（MuJoCo 要求主线程处理 Cocoa GUI）。
+> 且 Apple Game Controller Framework 会拦截 DualSense HID 报告导致按键映射错乱，
+> 本项目使用 `hidapi` 直接读取原始 HID 数据绕过此问题。
+
+### 前置：macOS 用户
+
+```bash
+# 安装 hidapi
+pip install hidapi
+```
+
+### 1. 运行Mujoco仿真代码
+
+**Linux（Xbox / PS 手柄）**：
 
 ```bash
 python deploy_mujoco/deploy_mujoco.py
+```
+
+**macOS（DualSense PS5 手柄）**：
+
+```bash
+mjpython deploy_mujoco/deploy_mujoco.py
 ```
 
 ## 2. Policy 说明
@@ -80,36 +108,48 @@ python deploy_mujoco/deploy_mujoco.py
 
 ## 3. 仿真操作说明
 
-1. 连接Xbox手柄
+### 手柄按键对应
 
-2. 运行仿真程序：
+| 功能 | Xbox | DualSense (PS5) |
+|------|------|-----------------|
+| 下方按键 | A | Cross (×) |
+| 右侧按键 | B | Circle (○) |
+| 左侧按键 | X | Square (□) |
+| 上方按键 | Y | Triangle (△) |
+| 左肩键 | LB / L1 | L1 |
+| 右肩键 | RB / R1 | R1 |
+| 返回键 | Select / View | Share |
+| 菜单键 | Start | Options |
+| 左摇杆按下 | L3 | L3 |
+| 右摇杆按下 | R3 | R3 |
 
-```bash
-python deploy_mujoco/deploy_mujoco.py
-```
+### 操作步骤
 
-如果需要机器人从平躺状态站立，进入 LocoMode ，则运行以下指令
+1. 连接手柄（USB 有线连接）
 
-```
-python deploy_mujoco/deploy_mujoco.py xml_path=g1_description/g1_29dof_LieDown.xml
-```
+2. 运行仿真程序
 
-3. Start键进入位控模式
+3. 启动后机器人自动进入 LocoMode 站立模式，可通过左摇杆控制行走
 
-4. 同时按住R1+A，进入LocoMode，并按下 `BACKSPACE`在仿真中使机器人站立，之后能通过摇杆控制机器人行走
-   (当机器人从平躺状态开始时，需要先按 L1+X 进入站立状态， 再按 R1+A 进入 LocoMode.)
+4. 按 **Start / Options** 键恢复站立姿态
 
-5. 同时按住R1+X，进入Dance，机器人开始跳查尔斯顿舞蹈，在该模式下，可以随时按下L1进入阻尼保护模式，也可以按住R1+A恢复行走模式（不推荐），或按Start进入位控模式（不推荐）
+5. 按住 **R1 + A (Cross ×)**，进入 LocoMode，可通过摇杆控制机器人行走
 
-6. 终端会显示舞蹈的进度条，结束后可按下R1+A恢复至正常行走模式
+6. 按住 **R1 + X (Square □)**，进入 Dance，机器人开始跳查尔斯顿舞蹈
 
-7. 在LocoMode模式下，按R1+Y让机器人表演武术动作，**只推荐在仿真中使用**
+7. 终端显示舞蹈进度条，结束后可按 R1+A 恢复至正常行走模式
 
-8. 在LocoMode模式下，按L1+Y让机器人表演训练失败的武术动作，**只推荐在仿真中使用**
+8. 在 LocoMode 模式下，按 **R1 + Y (Triangle △)** 表演武术动作，**只推荐在仿真中使用**
 
-9. 在LocoMode模式下，按R1+B让机器人表演踢腿动作，**只推荐在仿真中使用**
+9. 在 LocoMode 模式下，按 **L1 + Y (Triangle △)** 表演训练失败的武术动作，**只推荐在仿真中使用**
 
-10. 在LocoMode模式下，按 L1+A 让机器人表演ASAP跳跃动作，**只推荐在仿真中使用**
+10. 在 LocoMode 模式下，按 **R1 + B (Circle ○)** 表演踢腿动作，**只推荐在仿真中使用**
+
+11. 在 LocoMode 模式下，按 **L1 + A (Cross ×)** 表演 ASAP 跳跃动作，**只推荐在仿真中使用**
+
+12. 按下 **Select / Share** 键退出仿真程序
+
+> **注意**：所有组合键操作为"按住肩键 + 点按功能键"。在任意模式下按 **Start / Options** 可安全返回站立状态。
 
 ## 4. 真机操作说明
 

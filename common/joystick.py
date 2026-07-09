@@ -1,242 +1,273 @@
 """
-Joystick client for MuJoCo simulation on macOS with DualSense PS5 controller.
+Joystick interface for MuJoCo simulation.
 
-This module replaces the original pygame-based joystick with a file-based
-IPC approach that bypasses both SDL2 thread conflicts (mjpython puts Python
-on a background thread) and Apple Game Controller Framework button remapping.
+Supports two backends, selected automatically by platform:
 
-Architecture:
-  joystick_server.py (runs under NORMAL python, reads raw HID via hidapi)
-       │
-       │  writes state to /tmp/dualsense_state.json (atomic)
-       ▼
-  joystick.py (this module, runs under mjpython, reads the file)
+  - **pygame** (Linux/Windows): Works with Xbox, PlayStation, and most
+    standard gamepads via SDL2.
+  - **hidapi** (macOS + mjpython): Reads DualSense PS5 raw HID reports via a
+    subprocess. Necessary because mjpython puts Python on a background
+    thread (conflicting with pygame's Cocoa main-thread requirement) and
+    because Apple's Game Controller Framework remaps DualSense buttons.
 
-API is identical to the original pygame-based JoyStick class.
+Both backends expose the identical JoyStick / JoystickButton API.
 """
 
-import json
 import os
-import subprocess
 import sys
-import time
-import signal
-import atexit
-
 from enum import IntEnum, unique
 
-# --- State file path (must match joystick_server.py) ---
-STATE_FILE = "/tmp/dualsense_state.json"
-STOP_FILE = "/tmp/dualsense_stop"
 
-# Path to normal Python (not mjpython). Must be the conda env python
-# so that hidapi is available.
-_NORMAL_PYTHON = "/opt/homebrew/Caskroom/miniconda/base/envs/robomimic/bin/python"
-
+# ---------------------------------------------------------------------------
+# Shared enum
+# ---------------------------------------------------------------------------
 
 @unique
 class JoystickButton(IntEnum):
-    """Standard PlayStation/Xbox Layout"""
-    A = 0       # PS: Cross(×), Xbox: A
-    B = 1       # PS: Circle(○), Xbox: B
-    X = 2       # PS: Square(□), Xbox: X
+    """Standard PlayStation / Xbox Layout (same physical positions)."""
+    A = 0       # PS: Cross(×),   Xbox: A
+    B = 1       # PS: Circle(○),  Xbox: B
+    X = 2       # PS: Square(□),  Xbox: X
     Y = 3       # PS: Triangle(△), Xbox: Y
-    L1 = 4      # Left Bumper (L1 on PS)
-    R1 = 5      # Right Bumper (R1 on PS)
-    SELECT = 6  # Select/Share button
-    START = 7   # Start/Options button
-    L3 = 8      # Left Stick Press
-    R3 = 9      # Right Stick Press
-    HOME = 10   # PS: PS Button, Xbox: Xbox Button
-    UP = 11     # D-pad Up
-    DOWN = 12   # D-pad Down
-    LEFT = 13   # D-pad Left
-    RIGHT = 14  # D-pad Right
+    L1 = 4
+    R1 = 5
+    SELECT = 6   # PS: Share,      Xbox: View
+    START = 7    # PS: Options,    Xbox: Menu
+    L3 = 8       # Left stick press
+    R3 = 9       # Right stick press
+    HOME = 10
+    UP = 11
+    DOWN = 12
+    LEFT = 13
+    RIGHT = 14
 
 
-class JoyStick:
-    """Joystick interface that reads DualSense state from a file-based server.
+# ---------------------------------------------------------------------------
+# Backend detection
+# ---------------------------------------------------------------------------
 
-    The server process (joystick_server.py) reads raw HID reports and
-    writes parsed state to a JSON file. This client reads that file.
+def _is_macos_mjpython():
+    """True when running under mjpython on macOS (needs hidapi backend)."""
+    return sys.platform == 'darwin' and 'MJPYTHON_BIN' in os.environ
 
-    Usage (identical to original pygame-based version):
-        joystick = JoyStick()
-        while running:
-            joystick.update()
-            if joystick.is_button_pressed(JoystickButton.START):
-                ...
-    """
+
+# ---------------------------------------------------------------------------
+# pygame backend (Linux / Windows / standard Python on macOS)
+# ---------------------------------------------------------------------------
+
+class _JoyStickPygame:
+    """pygame-based joystick – works with Xbox, PS, and most gamepads."""
 
     def __init__(self):
+        import pygame
+        self._pygame = pygame
+        pygame.init()
+        pygame.joystick.init()
+
+        if pygame.joystick.get_count() == 0:
+            raise RuntimeError("No joystick connected!")
+
+        self.joystick = pygame.joystick.Joystick(0)
+        self.joystick.init()
+
+        self.button_count = self.joystick.get_numbuttons()
+        self.button_states = [False] * self.button_count
+        self.button_pressed = [False] * self.button_count
+        self.button_released = [False] * self.button_count
+
+        self.axis_count = self.joystick.get_numaxes()
+        self.axis_states = [0.0] * self.axis_count
+
+        self.hat_count = self.joystick.get_numhats()
+        self.hat_states = [(0, 0)] * self.hat_count
+
+    def update(self):
+        self._pygame.event.pump()
+        self.button_released = [False] * self.button_count
+        for i in range(self.button_count):
+            current = self.joystick.get_button(i) == 1
+            if self.button_states[i] and not current:
+                self.button_released[i] = True
+            self.button_states[i] = current
+        for i in range(self.axis_count):
+            self.axis_states[i] = self.joystick.get_axis(i)
+        for i in range(self.hat_count):
+            self.hat_states[i] = self.joystick.get_hat(i)
+
+    def is_button_pressed(self, button_id):
+        if 0 <= button_id < self.button_count:
+            return self.button_states[button_id]
+        return False
+
+    def is_button_released(self, button_id):
+        if 0 <= button_id < self.button_count:
+            return self.button_released[button_id]
+        return False
+
+    def get_axis_value(self, axis_id):
+        if 0 <= axis_id < self.axis_count:
+            return self.axis_states[axis_id]
+        return 0.0
+
+    def get_hat_direction(self, hat_id=0):
+        if 0 <= hat_id < self.hat_count:
+            return self.hat_states[hat_id]
+        return (0, 0)
+
+
+# ---------------------------------------------------------------------------
+# hidapi backend (macOS + mjpython, DualSense PS5 only)
+# ---------------------------------------------------------------------------
+
+class _JoyStickHID:
+    """DualSense HID joystick — bypasses macOS GCD & mjpython thread issues.
+
+    Spawns ``joystick_server.py`` as a subprocess (normal Python, not
+    mjpython) to read raw DualSense HID reports.  State is communicated
+    through an atomic JSON file at ``/tmp/dualsense_state.json``.
+    """
+
+    STATE_FILE = "/tmp/dualsense_state.json"
+    STOP_FILE  = "/tmp/dualsense_stop"
+    # Must use the conda env python so hidapi is importable.
+    _NORMAL_PYTHON = "/opt/homebrew/Caskroom/miniconda/base/envs/robomimic/bin/python"
+
+    def __init__(self):
+        import json, subprocess, time, atexit
+
         self._server_proc = None
         self._button_count = 15
         self._axis_count = 6
 
-        # Current state
-        self._button_states = [False] * self._button_count
-        self._button_pressed = [False] * self._button_count
+        self._button_states   = [False] * self._button_count
+        self._button_pressed  = [False] * self._button_count
         self._button_released = [False] * self._button_count
         self._axis_states = [0.0] * self._axis_count
-        self._hat_states = [(0, 0)]
-        self._connected = False
-
-        # Track previous button states for edge detection
+        self._hat_states  = [(0, 0)]
         self._prev_buttons = [False] * self._button_count
 
-        # Clean up any stale stop file
+        # Clean stale stop file
         try:
-            os.unlink(STOP_FILE)
+            os.unlink(self.STOP_FILE)
         except OSError:
             pass
 
-        # Start the HID server process
-        self._start_server()
-
-        # Register cleanup
-        atexit.register(self._cleanup)
-
-    def _start_server(self):
-        """Start the joystick server subprocess using normal Python."""
+        # Launch server
         server_script = os.path.join(
-            os.path.dirname(os.path.abspath(__file__)),
-            "joystick_server.py"
-        )
-
+            os.path.dirname(os.path.abspath(__file__)), "joystick_server.py")
         try:
             self._server_proc = subprocess.Popen(
-                [_NORMAL_PYTHON, server_script],
-                stdout=None,       # inherit — server logs show in terminal
-                stderr=None,
+                [self._NORMAL_PYTHON, server_script],
+                stdout=None, stderr=None,
                 start_new_session=True,
             )
-            print(f"[JoyStick] Started server (PID={self._server_proc.pid})", flush=True)
+            print(f"[JoyStick] HID server started (PID={self._server_proc.pid})",
+                  flush=True)
         except Exception as e:
-            print(f"[JoyStick] WARNING: Failed to start server: {e}", flush=True)
-            print("[JoyStick] Controller input will not work.", flush=True)
+            print(f"[JoyStick] WARNING: cannot start HID server: {e}", flush=True)
+            return
 
-        # Wait for server to produce first state
-        waited = 0
-        while waited < 50:  # 5 second timeout
-            if os.path.exists(STATE_FILE):
-                try:
-                    with open(STATE_FILE, 'r') as f:
-                        data = json.load(f)
-                    if data.get("connected", False):
-                        print(f"[JoyStick] Controller connected!", flush=True)
+        # Wait for server to connect to DualSense
+        for _ in range(50):
+            try:
+                with open(self.STATE_FILE, 'r') as f:
+                    if json.load(f).get("connected"):
+                        print("[JoyStick] Controller connected!", flush=True)
                         break
-                except (json.JSONDecodeError, IOError):
-                    pass
+            except (json.JSONDecodeError, IOError, FileNotFoundError):
+                pass
             time.sleep(0.1)
-            waited += 1
-
-        if waited >= 50:
+        else:
             print("[JoyStick] WARNING: Controller not detected. "
                   "Is DualSense connected via USB?", flush=True)
 
+        atexit.register(self._cleanup)
+
+    # -- cleanup ----------------------------------------------------------
+
     def _cleanup(self):
-        """Stop the server process and clean up."""
-        # Signal server to stop
         try:
-            with open(STOP_FILE, 'w') as f:
+            with open(self.STOP_FILE, 'w') as f:
                 f.write("stop")
         except IOError:
             pass
-
-        # Wait for server to exit
         if self._server_proc is not None:
             try:
                 self._server_proc.wait(timeout=3.0)
-            except subprocess.TimeoutExpired:
+            except Exception:
                 try:
                     self._server_proc.kill()
-                    self._server_proc.wait(timeout=1.0)
                 except Exception:
                     pass
-
-        # Remove temp files
-        for f in [STATE_FILE, STATE_FILE + ".tmp", STOP_FILE]:
+        for f in (self.STATE_FILE, self.STATE_FILE + ".tmp", self.STOP_FILE):
             try:
                 os.unlink(f)
             except OSError:
                 pass
 
+    # -- state I/O --------------------------------------------------------
+
     def _read_state(self):
-        """Read the current state from the server's output file."""
         try:
-            with open(STATE_FILE, 'r') as f:
+            import json
+            with open(self.STATE_FILE, 'r') as f:
                 return json.load(f)
         except (FileNotFoundError, json.JSONDecodeError, IOError):
             return None
 
     def update(self):
-        """Read latest controller state from server and detect edges."""
         state = self._read_state()
-
         if state is None:
-            if not hasattr(self, '_no_file_warned'):
-                self._no_file_warned = True
-                print(f"[JoyStick] Waiting for state file: {STATE_FILE}", flush=True)
             return
-
-        self._connected = state.get("connected", False)
         buttons = state.get("buttons", [])
-
         if not buttons:
             return
 
-        # Ensure arrays are the right size
         n_buttons = min(len(buttons), self._button_count)
-        n_axes = min(len(state.get("axes", [])), self._axis_count)
+        n_axes    = min(len(state.get("axes", [])), self._axis_count)
 
-        # Reset edge detection
         self._button_released = [False] * self._button_count
 
-        # Detect button press edges
         for i in range(n_buttons):
-            current = bool(buttons[i])
-            self._button_pressed[i] = current
-
-            # Rising edge = just pressed
-            if current and not self._prev_buttons[i]:
-                pass  # We don't track "pressed" edge separately from "is pressed"
-
-            # Falling edge = just released
-            if not current and self._prev_buttons[i]:
+            cur = bool(buttons[i])
+            if not cur and self._prev_buttons[i]:
                 self._button_released[i] = True
+            self._button_states[i] = cur
+            self._prev_buttons[i] = cur
 
-            self._button_states[i] = current
-            self._prev_buttons[i] = current
-
-        # Read axis values
         axes = state.get("axes", [])
         for i in range(n_axes):
             self._axis_states[i] = float(axes[i])
 
-        # Read hat
         hat = state.get("hat", [0, 0])
-        self._hat_states[0] = (int(hat[0]), int(hat[1])) if len(hat) >= 2 else (0, 0)
+        if len(hat) >= 2:
+            self._hat_states[0] = (int(hat[0]), int(hat[1]))
+
+    # -- public API (mirrors _JoyStickPygame) ----------------------------
 
     def is_button_pressed(self, button_id):
-        """Return True if the button is currently held down."""
         if 0 <= button_id < self._button_count:
             return self._button_states[button_id]
         return False
 
     def is_button_released(self, button_id):
-        """Return True on the frame the button is released (falling edge)."""
         if 0 <= button_id < self._button_count:
             return self._button_released[button_id]
         return False
 
     def get_axis_value(self, axis_id):
-        """Return current axis value (-1.0 to 1.0 for sticks, 0.0 to 1.0 for triggers)."""
         if 0 <= axis_id < self._axis_count:
             return self._axis_states[axis_id]
         return 0.0
 
     def get_hat_direction(self, hat_id=0):
-        """Return D-pad direction as (x, y) tuple: (-1/0/1, -1/0/1)."""
         if 0 <= hat_id < len(self._hat_states):
             return self._hat_states[hat_id]
         return (0, 0)
+
+
+# ---------------------------------------------------------------------------
+# Public class – auto-selects backend
+# ---------------------------------------------------------------------------
+
+JoyStick = _JoyStickHID if _is_macos_mjpython() else _JoyStickPygame

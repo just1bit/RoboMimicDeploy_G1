@@ -82,7 +82,7 @@ BUTTON_COUNT = 15
 #   0: Left X, 1: Left Y, 2: Right X, 3: Right Y, 4: L2, 5: R2
 AXIS_MAP = {
     0: (1, False),   # Left Stick X → byte 1, no inversion
-    1: (2, True),    # Left Stick Y → byte 2, inverted (HID: 0=up, game: -1=up)
+    1: (2, False),   # Left Stick Y → byte 2 (deploy_mujoco negates this, HID raw: 0=up)
     2: (3, False),   # Right Stick X → byte 3, no inversion
     3: (4, True),    # Right Stick Y → byte 4, inverted
     4: (5, False),   # L2 analog → byte 5 (0-255 → 0.0-1.0)

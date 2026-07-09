@@ -36,19 +36,9 @@ def main(cfg: DictConfig):
     mj_per_step_duration = simulation_dt * control_decimation
     num_joints = m.nu
     print(f"num_joints: {num_joints}")
-
-    # Pre-load HOST config for high PD gains to keep robot standing from step 0.
-    # Use straight-leg target (zeros) since MJCF initial pose is straight standing.
-    # Bent-knee default_angles from FixedPose cause forward collapse in simulation.
-    host_config_path = os.path.join(PROJECT_ROOT, "policy/host/config/host.yaml")
-    with open(host_config_path, "r") as f:
-        host_cfg = yaml.load(f, Loader=yaml.FullLoader)
-    host_kps = np.array(host_cfg["kps"], dtype=np.float32)
-    host_kds = np.array(host_cfg["kds"], dtype=np.float32)
-
-    policy_output_action = np.zeros(num_joints, dtype=np.float32)  # straight legs = MJCF zero pose
-    kps = host_kps.copy()
-    kds = host_kds.copy()
+    policy_output_action = np.zeros(num_joints, dtype=np.float32)
+    kps = np.zeros(num_joints, dtype=np.float32)
+    kds = np.zeros(num_joints, dtype=np.float32)
     sim_counter = 0
     
     state_cmd = StateAndCmd(num_joints)
@@ -72,7 +62,7 @@ def main(cfg: DictConfig):
 
                 if joystick.is_button_released(JoystickButton.X) and joystick.is_button_pressed(JoystickButton.L1):     # 摔倒爬起, L1+X
                     state_cmd.skill_cmd = FSMCommand.STAND_UP
-
+                    
                 if joystick.is_button_released(JoystickButton.A) and joystick.is_button_pressed(JoystickButton.R1):
                     state_cmd.skill_cmd = FSMCommand.LOCO
                 elif joystick.is_button_released(JoystickButton.X) and joystick.is_button_pressed(JoystickButton.R1):
@@ -85,7 +75,7 @@ def main(cfg: DictConfig):
                     state_cmd.skill_cmd = FSMCommand.SKILL_4
                 elif joystick.is_button_released(JoystickButton.A) and joystick.is_button_pressed(JoystickButton.L1):     # asap, L1+A
                     state_cmd.skill_cmd = FSMCommand.SKILL_5
-
+                
                 state_cmd.vel_cmd[0] = -joystick.get_axis_value(1)
                 state_cmd.vel_cmd[1] = -joystick.get_axis_value(0)
                 state_cmd.vel_cmd[2] = -joystick.get_axis_value(3)
