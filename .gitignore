@@ -1,0 +1,20 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+
+# Hydra outputs (simulation logs)
+outputs/
+
+# macOS
+.DS_Store
+
+# IDE
+.vscode/
+.idea/
+
+# Temp files
+/tmp/dualsense_*
+
+# Conda
+.env/

@@ -44,14 +44,19 @@ class FSM:
         
         print("initalized all policies!!!")
         
-        self.cur_policy = self.passive_mode             # 当前policy
+        self.cur_policy = self.loco_policy                # 启动用Loco站立（NN主动平衡，FixedPose静态PD站不住）
+        self._needs_enter = True                        # 首次run时调用enter()
         print("current policy is ", self.cur_policy.name_str)
-        
-        
-        
+
+
+
     def run(self):
+        if self._needs_enter:
+            self.cur_policy.enter()
+            self._needs_enter = False
+
         start_time = time.time()
-        if(self.FSMmode == FSMMode.NORMAL): 
+        if(self.FSMmode == FSMMode.NORMAL):
             self.cur_policy.run()
             nextPolicyName = self.cur_policy.checkChange()
             
@@ -85,7 +90,7 @@ class FSM:
         if(policy_name == FSMStateName.PASSIVE):
             self.cur_policy = self.passive_mode
         elif((policy_name == FSMStateName.FIXEDPOSE)):
-            self.cur_policy = self.fixed_pose_1
+            self.cur_policy = self.loco_policy      # FixedPose静态PD仿真站不住，重定向到Loco
         elif((policy_name == FSMStateName.LOCOMODE)):
             self.cur_policy = self.loco_policy
         elif((policy_name == FSMStateName.SKILL_KungFu)):
