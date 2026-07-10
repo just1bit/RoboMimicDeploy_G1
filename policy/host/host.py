@@ -132,11 +132,11 @@ class HOST(FSMState):
         if (target_dof_pos - self.joint_limit_min < 0).any():
             out_range_idx = np.where(target_dof_pos - self.joint_limit_min < 0)
             target_dof_pos[out_range_idx] = self.joint_limit_min[out_range_idx] + 0.05
-            print(f"[INFO] joint limit out of min. index: {np.where(target_dof_pos - self.joint_limit_min < 0)}")
+            print(f"[INFO] joint limit out of min. index: {out_range_idx}")
         if (target_dof_pos - self.joint_limit_max > 0).any():
             out_range_idx = np.where(target_dof_pos - self.joint_limit_max > 0)
             target_dof_pos[out_range_idx] = self.joint_limit_max[out_range_idx] - 0.05
-            print(f"[INFO] joint limit out of max. index: {np.where(target_dof_pos - self.joint_limit_max > 0)}")
+            print(f"[INFO] joint limit out of max. index: {out_range_idx}")
 
         if self.real_episode_length_buf <= 1:
             target_dof_pos = self.default_angles.copy()

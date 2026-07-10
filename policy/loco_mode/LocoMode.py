@@ -122,7 +122,10 @@ class LocoMode(FSMState):
             return FSMStateName.SKILL_ASAP
         elif(self.state_cmd.skill_cmd == FSMCommand.STAND_UP):
             self.state_cmd.skill_cmd = FSMCommand.INVALID
-            return FSMStateName.STANDMODE
+            if self.gravity_orientation[2] < 0.4:
+                return FSMStateName.STANDMODE
+            else:
+                return FSMStateName.LOCOMODE
         elif(self.state_cmd.skill_cmd == FSMCommand.PASSIVE):
             return FSMStateName.PASSIVE
         else:
