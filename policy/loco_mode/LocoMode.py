@@ -43,7 +43,9 @@ class LocoMode(FSMState):
             self.cmd = np.array(config["cmd_init"], dtype=np.float32)
             self.obs = np.zeros(self.num_obs)
             self.action = np.zeros(self.num_actions)
-            
+            self.kp_ramp_steps = 15
+            self.kp_ramp_counter = 0
+
             # load policy
             self.policy = torch.jit.load(self.policy_path)
             
@@ -57,6 +59,7 @@ class LocoMode(FSMState):
                 
     
     def enter(self):
+        self.kp_ramp_counter = 0
         self.kps_reorder = np.zeros_like(self.kps)
         self.kds_reorder = np.zeros_like(self.kds)
         self.default_angles_reorder = np.zeros_like(self.default_angles)
@@ -101,10 +104,14 @@ class LocoMode(FSMState):
             action_reorder[motor_idx] = loco_action[i]
             
         
-        self.policy_output.actions = action_reorder.copy()          # 获取policy输出的action
-        self.policy_output.kps = self.kps_reorder.copy()
+        self.policy_output.actions = action_reorder.copy()
+        if self.kp_ramp_counter < self.kp_ramp_steps:
+            ramp = 0.5 + 0.5 * (self.kp_ramp_counter / self.kp_ramp_steps)
+            self.policy_output.kps = (self.kps_reorder * ramp).copy()
+            self.kp_ramp_counter += 1
+        else:
+            self.policy_output.kps = self.kps_reorder.copy()
         self.policy_output.kds = self.kds_reorder.copy()
-        # print("actions: ", self.policy_output.actions)
     
     def exit(self):
         pass
