@@ -118,6 +118,9 @@ class SkillCooldown(FSMState):
         elif(self.state_cmd.skill_cmd == FSMCommand.PASSIVE):
             self.state_cmd.skill_cmd = FSMCommand.INVALID
             return FSMStateName.PASSIVE
+        elif(self.state_cmd.skill_cmd == FSMCommand.POS_RESET):
+            self.state_cmd.skill_cmd = FSMCommand.INVALID
+            return FSMStateName.FIXEDPOSE
         else:
             self.state_cmd.skill_cmd = FSMCommand.INVALID
             return FSMStateName.SKILL_COOLDOWN
